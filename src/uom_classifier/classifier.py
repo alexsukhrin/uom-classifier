@@ -75,8 +75,16 @@ DOSAGE_FORMS = frozenset(
         "ліофілізат",
     }
 )
-# Real units that are simply outside the canonical set.
-FOREIGN_UNITS = frozenset({"набір", "комплект", "тонна"})
+# Real units that are simply outside the model's classes. Blister, jar and
+# canister are canonical in the downstream dictionary (v0.3.0), but the model
+# has no class for them — any opinion it had would be guaranteed wrong.
+FOREIGN_UNITS = frozenset(
+    {
+        "набір", "комплект", "тонна",
+        "блістер", "блістери", "банка", "банки",
+        "каністра", "каністр", "каністри",
+    }
+)  # fmt: skip
 
 
 def clean(raw: str | None) -> str:

@@ -65,6 +65,16 @@ def test_exact_table_never_resolves_duals_or_new_units():
     assert clf.lookup("блістер") is None  # legit unit outside the canon
 
 
+@pytest.mark.parametrize(
+    "form", ["блістер", "Блістер.", "банка", "каністра", "каністр", "каністри"]
+)
+def test_dictionary_only_units_keep_the_model_silent(form):
+    # v0.3.0: canonical downstream, but the model has no class for them.
+    assert clf.is_classifiable(form) is False
+    assert clf.classify(form) is None
+    assert set(clf.classes) & {"блістер", "банка", "каністра"} == set()
+
+
 @pytest.mark.parametrize("form", ["тис. доз", "фл. 40мл", "100 шт"])
 def test_exact_table_never_drops_an_amount(form):
     # «5 тис. доз» must not silently become «5 доз».
