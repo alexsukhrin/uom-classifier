@@ -8,4 +8,4 @@
 from .classifier import UomClassifier, extract_ngrams
 
 __all__ = ["UomClassifier", "extract_ngrams"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

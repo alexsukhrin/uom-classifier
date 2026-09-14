@@ -18,14 +18,17 @@ import datetime
 import json
 import logging
 import random
+import re
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from .classifier import extract_ngrams
+from .classifier import clean, exact_key, extract_ngrams, is_classifiable
 
 logger = logging.getLogger("uom_classifier.train")
+
+ARTIFACT_VERSION = 2
 
 AUG_PER_FORM = 10
 TARGET_PRECISION = 0.98
@@ -63,14 +66,57 @@ def augment(form: str, rng: random.Random) -> str:
 
 
 def load_dataset(path: Path) -> tuple[list[tuple[str, str]], list[tuple[str, str]], dict[str, str], list[str]]:
-    """(campaign_pairs, base_pairs, vocabulary, classes)."""
+    """(campaign_pairs, base_pairs, vocabulary, classes).
+
+    Campaign pairs are cleaned and restricted to forms the classifier is
+    allowed to judge (:func:`is_classifiable`): training on duals, digits or
+    dosage forms would teach the model opinions it is never asked for, and
+    evaluating on them inflates CV with forms that inference excludes.
+    """
     raw = json.loads(path.read_text(encoding="utf-8"))
     classes = sorted(raw["canons"])
     vocabulary = {k.casefold(): v for k, v in raw["vocabulary"].items()}
-    campaign = [(f, l) for f, l in raw["pairs"].items() if l in raw["canons"]]
+    campaign = [
+        (clean(f), l)
+        for f, l in raw["pairs"].items()
+        if l in raw["canons"] and is_classifiable(f, vocabulary)
+    ]
     base = [(f, l) for f, l in vocabulary.items()]
     base.extend((c, c) for c in classes)
     return campaign, base, vocabulary, classes
+
+
+_NUMERIC_TOKEN_RE = re.compile(r"^\d")
+_MULTIPLIERS = frozenset({"тис", "тис.", "тисяч", "тисяча", "млн", "млн."})
+
+
+def carries_quantity(key: str) -> bool:
+    """A form that encodes an amount, not just a unit («100 шт», «фл. 40мл»,
+    «тис. доз»). Resolving it to the bare unit would silently rescale the
+    quantity — «5 тис. доз» must not become «5 доз». Digits INSIDE a letter
+    token («д03» = OCR «доз») are a glyph confusion, not an amount."""
+    tokens = key.split()
+    return any(_NUMERIC_TOKEN_RE.match(t) or t in _MULTIPLIERS for t in tokens)
+
+
+def build_exact(raw_exact: dict[str, str], vocabulary: dict[str, str], classes: list[str]) -> tuple[dict[str, str], int]:
+    """Exact lookup table from labeled forms: (table, conflicts_dropped).
+
+    Keys go through :func:`exact_key` — the same normalization the
+    classifier applies at lookup. A key that two raw forms map to DIFFERENT
+    labels is ambiguous and dropped; keys already in the vocabulary are left
+    to the vocabulary (it is consulted first); forms that carry an amount
+    (:func:`carries_quantity`) are never resolved to a bare unit.
+    """
+    labels: dict[str, set[str]] = {}
+    for form, label in raw_exact.items():
+        if label not in classes:
+            continue
+        key = exact_key(form)
+        if key and key not in vocabulary and not carries_quantity(key):
+            labels.setdefault(key, set()).add(label)
+    table = {k: next(iter(v)) for k, v in sorted(labels.items()) if len(v) == 1}
+    return table, sum(1 for v in labels.values() if len(v) > 1)
 
 
 def with_augmentation(pairs: list[tuple[str, str]], rng: random.Random) -> list[tuple[str, str]]:
@@ -220,20 +266,27 @@ def train(dataset_path: Path, out_path: Path, *, k_folds: int = 5) -> dict[str, 
         if float(np.abs(row).max()) >= 0.02:
             sparse[g] = [round(float(v), 3) for v in row]
 
+    raw_exact = json.loads(dataset_path.read_text(encoding="utf-8")).get("exact", {})
+    exact, exact_conflicts = build_exact(raw_exact, vocabulary, classes)
+    logger.info("exact table: %d forms (%d ambiguous keys dropped)", len(exact), exact_conflicts)
+
     artifact: dict[str, Any] = {
-        "version": 1,
+        "version": ARTIFACT_VERSION,
         "trained_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "classes": classes,
         "threshold": threshold,
         "bias": [round(float(v), 4) for v in b],
         "weights": sparse,
         "vocabulary": vocabulary,
+        "exact": exact,
         "metrics": {
             "cv_folds": k_folds,
             "cv_test_forms": cv_n,
             "cv_coverage": round(cv_coverage, 4),
             "cv_precision": round(cv_precision, 4),
             "campaign_pairs": len(campaign),
+            "exact_forms": len(exact),
+            "exact_conflicts_dropped": exact_conflicts,
             "features_kept": len(sparse),
             "features_total": len(feature_index),
         },
