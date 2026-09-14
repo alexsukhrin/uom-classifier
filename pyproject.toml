@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "uom-classifier"
-version = "0.1.0"
+version = "0.2.0"
 description = "Tiny dependency-free classifier that maps noisy OCR'd Ukrainian unit-of-measure strings to canonical units"
 readme = "README.md"
 license = { text = "MIT" }
