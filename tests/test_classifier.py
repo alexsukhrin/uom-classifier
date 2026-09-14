@@ -20,7 +20,7 @@ DATASET = json.loads(
 
 
 def test_artifact_is_v2_with_exact_table():
-    assert clf.version == 2
+    assert clf.version == 3  # v0.4: v2 format + product-name context + __keep__
     assert clf.exact, "v2 artifact must ship the exact table"
 
 
