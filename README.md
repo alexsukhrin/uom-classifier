@@ -27,7 +27,7 @@ silence over guessing.
 1. **Clean** — HTML tags from the PDF text layer are stripped
    (`<b>lit</b>` → `lit`), whitespace collapsed.
 2. **Exact lookup** — the vocabulary of common spellings, then the
-   labeled forms of the production campaign (`exact`, 602 forms). A form a
+   labeled forms of the production campaign (`exact`, 617 forms). A form a
    reviewed campaign already resolved is answered deterministically: a
    softmax over 22 classes is often *below threshold on its own training
    examples* when they are short (`lilt.`, `пл.`).
@@ -44,14 +44,15 @@ corruptions never repeats exactly. This model covers that tail:
 * **model**: softmax regression over character n-grams (1..4) — a ~1.5 MB
   JSON of sparse weights, inference in pure Python (microseconds per call,
   no numpy/torch at runtime);
-* **training data**: 731 real OCR forms labeled in a production
+* **training data**: 755 real OCR forms labeled in a production
   data-quality campaign on Ukrainian public procurement data (Prozorro) +
   a hand-curated vocabulary of 125 common spellings, augmented with
   synthetic OCR corruptions (Cyrillic↔Latin homoglyphs, dots, spaces,
   case);
 * **honest metrics** (5-fold CV on campaign forms the model never saw,
-  restricted to forms the model is allowed to judge): **coverage 52.9% @
-  precision 98.6%**, threshold 0.735 — it confidently resolves half of the
+  restricted to forms the model is allowed to judge): **coverage 44.6% @
+  precision 98.4%**, threshold 0.745 (0.2.0: 52.9% @ 98.6%; one degenerate
+  fold, see the changelog) — it confidently resolves a large share of the
   unseen junk and stays silent on the rest;
 * **on live data** (278 non-canonical unit rows from a week of production
   after training): v0.1 resolved 6.5%, v0.2 resolves **26.3%** — 54 rows
@@ -102,6 +103,30 @@ is self-contained. The notebook walks through the v0.1 pipeline; the
 exact table and exclusions of v0.2 live in `train.py` / `classifier.py`.
 
 ## Changelog
+
+**0.3.0**
+- 24 campaign forms that had medium/low confidence were promoted to the
+  labeled set (`pairs` 731 → 755, `exact` 602 → 617). Each was re-judged by an
+  independent second LLM judge (gpt-5.5) that saw the raw form and up to five
+  product names but **not** the first label; promotion required agreement
+  at the judge's high confidence. Forms carrying an amount, unit/package
+  duals and two different specific units behind a slash (`амп/флак`) were
+  never promoted. Largest: `lit` → штука, `kl` → кг.
+- The exact key `іпт` is now dropped as ambiguous: by casing it was labeled
+  `л` (liquids) and `штука` (pieces); without product context the table
+  stays silent instead of guessing.
+- Blister, jar and canister (`блістер`, `банка`, `каністра`) became canonical
+  units downstream; they are **not** model classes (1–7 examples each would
+  add noise and reshape the softmax over the 22 existing classes). They are
+  excluded explicitly so the model never forces them into a wrong class.
+- CV (5-fold, default seed): coverage 44.6% @ precision 98.4% (0.2.0:
+  52.9% @ 98.6%). The drop comes from one degenerate fold (threshold 0.99,
+  coverage 3.4%); the other four folds reach 18–72% coverage at ≥ 98.6%
+  precision. A multi-seed comparison was started but did not finish —
+  re-run CV over several seeds before merging.
+- Live residual (278 rows): 26.3% → 51.1% together with the downstream
+  dictionary (exact table 92 rows, model 4); no row resolved by 0.2.0 is lost
+  or changed.
 
 **0.2.0**
 - HTML tags are stripped before lookup and classification.
